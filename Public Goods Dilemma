@@ -42,6 +42,8 @@ show_results = False
 final_message = ""
 show_gameplay = False
 waiting_to_continue = False
+show_reputation_summary = False
+
 
 player_total_donation = 0
 ai_total_donations = [0 for _ in range(NUM_AI)]
@@ -92,8 +94,8 @@ def ai_contribute(index):
         base = group_avg * cooperation
         base_contrib = int(random.gauss(base, 8))
     elif profile == "social":
-        base = group_avg * random.uniform(1.0, 1.15) * cooperation
-        base_contrib = int(random.gauss(base, 7))
+        base_contrib = int(random.gauss(45, 5))
+        base_contrib = max(40, min(60, base_contrib))
     elif profile == "free_rider":
         if group_avg > 50:
             base = random.uniform(0, 10) * cooperation
@@ -170,10 +172,9 @@ def draw_round_summary():
     draw_text_center(f"Round {current_round} Summary", 80, BIG_FONT)
     draw_text_center(f"You donated: ${last_player}", 150, FONT)
 
-    avg_ai = sum(last_ai) / len(last_ai)
-    lower = max(0, int(avg_ai - 10))
-    upper = min(60, int(avg_ai + 10))
-    draw_text_center(f"AI players donated roughly between ${lower} and ${upper}", 210, SMALL_FONT)
+    min_ai = min(last_ai)
+    max_ai = max(last_ai)
+    draw_text_center(f"AI players donated between ${min_ai} and ${max_ai}", 210, SMALL_FONT)
 
     pygame.draw.rect(screen, MINT_GREEN, continue_button, border_radius=8)
     text = button_font.render("Continue", True, WHITE)
@@ -212,8 +213,36 @@ def draw_results():
         y += 90
 
     pygame.draw.rect(screen, MINT_GREEN, replay_button, border_radius=8)
+    text = button_font.render("Summary", True, WHITE)
+    text_rect = text.get_rect(center=replay_button.center)
+    screen.blit(text, text_rect)
+
+
+def draw_reputation_summary():
+    screen.fill(LIGHT_BG)
+    draw_text_center("Community Reputation Summary", 100, BIG_FONT)
+
+    y = 180
+    all_donations = [player_total_donation] + ai_total_donations
+    avg_donation = sum(all_donations) / len(all_donations)
+    low_contributors = []
+
+    for i, donation in enumerate(ai_total_donations):
+        if donation < avg_donation * 0.4:
+            draw_text_center(f"AI Player {i+1} was identified as a freeloader. Reputation declined.Everyone criticizes him", y, SMALL_FONT, CORAL)
+            y += 40
+
+    if player_total_donation < avg_donation * 0.2:
+        draw_text_center("You were seen as a freeloader in the community. Reputation declined.Your crush no longer likes you", y, SMALL_FONT, CORAL)
+        y += 40
+
+    if y == 180:
+        draw_text_center("No one significantly under-contributed. Trust remains stable.", y, SMALL_FONT, MINT_GREEN)
+
+    pygame.draw.rect(screen, MINT_GREEN, replay_button, border_radius=8)
     text = button_font.render("Play Again", True, WHITE)
     screen.blit(text, (replay_button.x + 45, replay_button.y + 15))
+
 
 def draw_instructions():
     screen.fill(WHITE)
@@ -238,7 +267,7 @@ def draw_instructions():
     screen.blit(text, (start_button.x + 55, start_button.y + 15))
 
 def reset_game():
-    global current_round, total_contribution, player_funds, history, message, show_instructions, show_results, final_message
+    global current_round, total_contribution, player_funds, history, message, show_instructions, show_results, final_message, show_reputation_summary
     global player_total_donation, ai_total_donations, ai_behavior_memory, ai_cooperation_factor, player_input, waiting_to_continue, PROJECT_GOAL
 
     current_round = 1
@@ -248,6 +277,7 @@ def reset_game():
     message = ""
     show_instructions = False
     show_results = False
+    show_reputation_summary = False
     final_message = ""
     player_total_donation = 0
     ai_total_donations = [0 for _ in range(NUM_AI)]
@@ -258,7 +288,7 @@ def reset_game():
     PROJECT_GOAL = int(BASE_PROJECT_GOAL * random.uniform(0.9, 1.1))  # 新游戏重新设定目标
 
 def main():
-    global input_active, input_color, player_input, current_round, show_results, waiting_to_continue, show_instructions, message
+    global input_active, input_color, player_input, current_round, show_results, waiting_to_continue, show_instructions, message, show_reputation_summary
 
     running = True
     while running:
@@ -276,10 +306,21 @@ def main():
                         show_instructions = False
                         reset_game()
 
+
+
             elif show_results:
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     if replay_button.collidepoint(event.pos):
+                        # 点击结果页的按钮，进入声誉总结页
+                        show_results = False
+                        show_reputation_summary = True
+
+            elif show_reputation_summary:
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if replay_button.collidepoint(event.pos):
+                        # 点击声誉页的按钮，重新开始游戏
                         reset_game()
+                        show_reputation_summary = False
 
             elif waiting_to_continue:
                 if event.type == pygame.MOUSEBUTTONDOWN:
@@ -321,6 +362,8 @@ def main():
             draw_instructions()
         elif show_results:
             draw_results()
+        elif show_reputation_summary:
+            draw_reputation_summary()
         elif waiting_to_continue:
             draw_round_summary()
         else:
