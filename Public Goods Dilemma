@@ -1,0 +1,342 @@
+import pygame
+import random
+import sys
+
+pygame.init()
+pygame.font.init()
+
+WIDTH, HEIGHT = 1024, 768
+FPS = 60
+FONT = pygame.font.SysFont("Verdana", 28)
+SMALL_FONT = pygame.font.SysFont("Verdana", 20)
+BIG_FONT = pygame.font.SysFont("Verdana", 40, bold=True)
+
+WHITE = (255, 255, 255)
+BLACK = (30, 30, 30)
+SOFT_BLUE = (173, 216, 230)
+MINT_GREEN = (0, 140, 90)
+CORAL = (200, 60, 60)
+LIGHT_GRAY = (220, 220, 220)
+LIGHT_BG = (245, 255, 250)
+
+NUM_AI = 4
+TOTAL_ROUNDS = 5
+BASE_PROJECT_GOAL = 700
+PROJECT_GOAL = int(BASE_PROJECT_GOAL * random.uniform(0.9, 1.1))
+FAIL_PENALTY = 200
+PLAYER_INCOME = 100
+MIN_DONATION = 0
+MAX_DONATION = 100
+
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Public Goods Dilemma")
+clock = pygame.time.Clock()
+
+current_round = 1
+total_contribution = 0
+player_funds = PLAYER_INCOME
+history = []
+message = ""
+show_instructions = True
+show_results = False
+final_message = ""
+show_gameplay = False
+waiting_to_continue = False
+
+player_total_donation = 0
+ai_total_donations = [0 for _ in range(NUM_AI)]
+ai_behavior_memory = [[] for _ in range(NUM_AI)]
+ai_profiles = ["follower", "social", "free_rider", "opportunist"]
+
+ai_cooperation_factor = [1.0 for _ in range(NUM_AI)]
+
+input_box = pygame.Rect(460, 225, 120, 50)
+color_inactive = LIGHT_GRAY
+color_active = SOFT_BLUE
+input_color = color_inactive
+input_active = False
+player_input = ""
+
+button_font = pygame.font.SysFont("Verdana", 24)
+replay_button = pygame.Rect(WIDTH // 2 - 100, 650, 200, 60)
+start_button = pygame.Rect(WIDTH // 2 - 120, 500, 240, 60)
+continue_button = pygame.Rect(WIDTH // 2 - 100, 600, 200, 50)
+
+cursor_visible = True
+cursor_timer = 0
+cursor_interval = 500
+
+def marginal_public_benefit(total):
+    if total >= PROJECT_GOAL:
+        excess = total - PROJECT_GOAL
+        return max(70, 100 - excess * 0.5)
+    else:
+        return 100 * (total / PROJECT_GOAL)
+
+def ai_contribute(index):
+    profile = ai_profiles[index]
+    memory = ai_behavior_memory[index]
+
+    if history:
+        last_round = history[-1]
+        last_player_donation = last_round[0]
+        last_ai_donations = last_round[1]
+        group_avg = sum(last_ai_donations) / len(last_ai_donations)
+    else:
+        group_avg = 45
+
+    cooperation = ai_cooperation_factor[index]
+
+    base_contrib = 0
+    if profile == "follower":
+        base = group_avg * cooperation
+        base_contrib = int(random.gauss(base, 8))
+    elif profile == "social":
+        base = group_avg * random.uniform(1.0, 1.15) * cooperation
+        base_contrib = int(random.gauss(base, 7))
+    elif profile == "free_rider":
+        if group_avg > 50:
+            base = random.uniform(0, 10) * cooperation
+        else:
+            base = random.uniform(0, 20) * cooperation
+        base_contrib = int(random.gauss(base, 6))
+    elif profile == "opportunist":
+        recent_rounds = [sum(r[1]) + r[0] for r in history[-3:]] if len(history) >= 3 else []
+        recent_avg = sum(recent_rounds) / len(recent_rounds) if recent_rounds else 30
+        if recent_avg > 60:
+            base = group_avg * random.uniform(0.85, 1.3) * cooperation
+        else:
+            base = group_avg * random.uniform(0.2, 0.6) * cooperation
+        base_contrib = int(random.gauss(base, 9))
+
+    contribution = max(0, min(60, base_contrib))
+    ai_behavior_memory[index].append(contribution)
+    return contribution
+
+def draw_text_center(text, y, font, color=BLACK):
+    if not isinstance(text, str):
+        text = str(text)
+    rendered = font.render(text, True, color)
+    rect = rendered.get_rect(center=(WIDTH // 2, y))
+    screen.blit(rendered, rect)
+
+def process_round(player_donation):
+    global current_round, total_contribution, show_results, message, player_total_donation, final_message, waiting_to_continue, ai_cooperation_factor, PROJECT_GOAL
+
+    player_donation = max(MIN_DONATION, min(MAX_DONATION, player_donation))
+    player_total_donation += player_donation
+    round_total = player_donation
+    round_ai_donations = []
+
+    for i in range(NUM_AI):
+        ai_donation = ai_contribute(i)
+        ai_total_donations[i] += ai_donation
+        round_total += ai_donation
+        round_ai_donations.append(ai_donation)
+
+    total_contribution += round_total
+    history.append((player_donation, round_ai_donations))
+
+    # AI合作因子减少
+    if round_total < PROJECT_GOAL / TOTAL_ROUNDS:
+        for i in range(NUM_AI):
+            ai_cooperation_factor[i] = max(0.4, ai_cooperation_factor[i] - 0.1)
+
+    waiting_to_continue = True
+
+def draw_gameplay():
+    screen.fill(LIGHT_BG)
+    draw_text_center(f"Round {current_round} of {TOTAL_ROUNDS}", 50, BIG_FONT)
+    draw_text_center(f"Players: {NUM_AI + 1}  |  Income this round: ${PLAYER_INCOME}", 100, FONT)
+    draw_text_center(f"Total Contribution: ${total_contribution} / {PROJECT_GOAL}", 150, FONT)
+    draw_text_center("Enter your donation (0-100):", 200, FONT)
+
+    pygame.draw.rect(screen, input_color, input_box, 3, border_radius=6)
+    txt_surface = FONT.render(player_input, True, BLACK)
+    screen.blit(txt_surface, (input_box.x + 15, input_box.y + 10))
+
+    if input_active and cursor_visible:
+        cursor_x = input_box.x + 15 + txt_surface.get_width()
+        cursor_y_start = input_box.y + 10
+        cursor_y_end = cursor_y_start + txt_surface.get_height()
+        pygame.draw.line(screen, BLACK, (cursor_x, cursor_y_start), (cursor_x, cursor_y_end), 3)
+
+    if message:
+        draw_text_center(message, HEIGHT - 80, SMALL_FONT, CORAL)
+
+def draw_round_summary():
+    screen.fill(LIGHT_BG)
+    last_player, last_ai = history[-1]
+    draw_text_center(f"Round {current_round} Summary", 80, BIG_FONT)
+    draw_text_center(f"You donated: ${last_player}", 150, FONT)
+
+    avg_ai = sum(last_ai) / len(last_ai)
+    lower = max(0, int(avg_ai - 10))
+    upper = min(60, int(avg_ai + 10))
+    draw_text_center(f"AI players donated roughly between ${lower} and ${upper}", 210, SMALL_FONT)
+
+    pygame.draw.rect(screen, MINT_GREEN, continue_button, border_radius=8)
+    text = button_font.render("Continue", True, WHITE)
+    screen.blit(text, (continue_button.x + 55, continue_button.y + 12))
+
+def draw_results():
+    screen.fill(LIGHT_BG)
+    draw_text_center("Game Over", 100, BIG_FONT)
+
+    total_benefit = marginal_public_benefit(total_contribution)
+    if total_contribution >= PROJECT_GOAL:
+        status_msg = f"Project Funded! Total Benefit: {int(total_benefit)} points"
+        penalty = 0
+        exempt_index = None
+    else:
+        status_msg = "Project Failed. Penalty applied."
+        penalty = FAIL_PENALTY
+        all_donations = [player_total_donation] + ai_total_donations
+        max_donation = max(all_donations)
+        exempt_index = all_donations.index(max_donation)
+
+    draw_text_center(status_msg, 140, SMALL_FONT)
+
+    y = 200
+    player_penalty = 0 if exempt_index == 0 else penalty
+    player_net = PLAYER_INCOME * TOTAL_ROUNDS - player_total_donation + total_benefit - player_penalty
+    draw_text_center(f"You donated total: ${player_total_donation}", y, SMALL_FONT)
+    draw_text_center(f"Your final income: ${int(player_net)}", y + 30, SMALL_FONT)
+
+    y += 90
+    for i, total_don in enumerate(ai_total_donations):
+        ai_penalty = 0 if exempt_index == i + 1 else penalty
+        ai_net = PLAYER_INCOME * TOTAL_ROUNDS - total_don + total_benefit - penalty
+        draw_text_center(f"AI Player {i+1} donated total: ${total_don}", y, SMALL_FONT)
+        draw_text_center(f"AI Player {i+1} final income: ${int(ai_net)}", y + 30, SMALL_FONT)
+        y += 90
+
+    pygame.draw.rect(screen, MINT_GREEN, replay_button, border_radius=8)
+    text = button_font.render("Play Again", True, WHITE)
+    screen.blit(text, (replay_button.x + 45, replay_button.y + 15))
+
+def draw_instructions():
+    screen.fill(WHITE)
+    draw_text_center("Welcome to the Public Goods Dilemma", 100, BIG_FONT)
+    y = 180
+    lines = [
+        "You are one of five residents in a virtual community.",
+        "Each round, you receive $100 in income.",
+        "You decide how much of it to contribute to a community project.",
+        "If total contributions from all residents reach the goal ,",
+        "a shared benefit is provided to everyone (even non-donors).",
+        "If the goal is not reached, all residents except for the one who donated the most suffer a penalty.",
+        "AI residents behave differently: some follow others, some free-ride.",
+        "Try to balance your own gain with the community's success."
+    ]
+    for line in lines:
+        draw_text_center(line, y, SMALL_FONT)
+        y += 35
+
+    pygame.draw.rect(screen, MINT_GREEN, start_button, border_radius=8)
+    text = button_font.render("Start Game", True, WHITE)
+    screen.blit(text, (start_button.x + 55, start_button.y + 15))
+
+def reset_game():
+    global current_round, total_contribution, player_funds, history, message, show_instructions, show_results, final_message
+    global player_total_donation, ai_total_donations, ai_behavior_memory, ai_cooperation_factor, player_input, waiting_to_continue, PROJECT_GOAL
+
+    current_round = 1
+    total_contribution = 0
+    player_funds = PLAYER_INCOME
+    history = []
+    message = ""
+    show_instructions = False
+    show_results = False
+    final_message = ""
+    player_total_donation = 0
+    ai_total_donations = [0 for _ in range(NUM_AI)]
+    ai_behavior_memory = [[] for _ in range(NUM_AI)]
+    ai_cooperation_factor = [1.0 for _ in range(NUM_AI)]
+    player_input = ""
+    waiting_to_continue = False
+    PROJECT_GOAL = int(BASE_PROJECT_GOAL * random.uniform(0.9, 1.1))  # 新游戏重新设定目标
+
+def main():
+    global input_active, input_color, player_input, current_round, show_results, waiting_to_continue, show_instructions, message
+
+    running = True
+    while running:
+        clock.tick(FPS)
+        cursor_animation()
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+                continue
+
+            if show_instructions:
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if start_button.collidepoint(event.pos):
+                        show_instructions = False
+                        reset_game()
+
+            elif show_results:
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if replay_button.collidepoint(event.pos):
+                        reset_game()
+
+            elif waiting_to_continue:
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if continue_button.collidepoint(event.pos):
+                        waiting_to_continue = False
+                        current_round += 1
+                        message = ""
+                        if current_round > TOTAL_ROUNDS:
+                            show_results = True
+
+            else:
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if input_box.collidepoint(event.pos):
+                        input_active = True
+                        input_color = color_active
+                    else:
+                        input_active = False
+                        input_color = color_inactive
+
+                if event.type == pygame.KEYDOWN and input_active and not waiting_to_continue:
+                    if event.key == pygame.K_RETURN:
+                        if player_input.isdigit():
+                            donation = int(player_input)
+                            if MIN_DONATION <= donation <= MAX_DONATION:
+                                process_round(donation)
+                                player_input = ""
+                                message = ""
+                            else:
+                                message = "Please enter a number between 0 and 100."
+                        else:
+                            message = "Invalid input! Enter a number."
+                    elif event.key == pygame.K_BACKSPACE:
+                        player_input = player_input[:-1]
+                    else:
+                        if len(player_input) < 3 and event.unicode.isdigit():
+                            player_input += event.unicode
+
+        if show_instructions:
+            draw_instructions()
+        elif show_results:
+            draw_results()
+        elif waiting_to_continue:
+            draw_round_summary()
+        else:
+            draw_gameplay()
+
+        pygame.display.update()
+
+    pygame.quit()
+    sys.exit()
+
+def cursor_animation():
+    global cursor_visible, cursor_timer
+    cursor_timer += clock.get_time()
+    if cursor_timer >= cursor_interval:
+        cursor_visible = not cursor_visible
+        cursor_timer = 0
+
+if __name__ == "__main__":
+    main()
