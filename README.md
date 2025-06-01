@@ -37,9 +37,9 @@
 - Python 3.x
 - 安装依赖库：
 
-\`\`\`bash
+\\\bash
 pip install pygame
-\`\`\`
+\\\
 
 ### ▶️ 启动游戏
 
