@@ -98,9 +98,9 @@ def ai_contribute(index):
         base_contrib = max(40, min(60, base_contrib))
     elif profile == "free_rider":
         if group_avg > 50:
-            base = random.uniform(0, 10) * cooperation
+            base = random.uniform(20, 30) * cooperation
         else:
-            base = random.uniform(0, 20) * cooperation
+            base = random.uniform(20, 40) * cooperation
         base_contrib = int(random.gauss(base, 6))
     elif profile == "opportunist":
         recent_rounds = [sum(r[1]) + r[0] for r in history[-3:]] if len(history) >= 3 else []
